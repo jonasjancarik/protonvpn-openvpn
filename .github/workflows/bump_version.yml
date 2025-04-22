@@ -1,0 +1,66 @@
+# .github/workflows/bump_version.yml
+name: Bump Version and Tag
+
+on:
+  push:
+    branches:
+      - main # Or your default branch
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    # Prevent running on commits made by the action itself
+    if: "!contains(github.event.head_commit.message, 'ci: Bump version to')"
+    permissions:
+      contents: write # Needed to push changes and tags
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetches all history for all tags
+
+      - name: Get current user info
+        id: user_info
+        run: |
+          echo "name=$(git log -1 --pretty=format:'%an')" >> $GITHUB_OUTPUT
+          echo "email=$(git log -1 --pretty=format:'%ae')" >> $GITHUB_OUTPUT
+
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: "patch" # Default bump type if no specific instruction found
+          # Look for [bump major], [bump minor], [bump patch] in commit messages
+          release_branches: main # Only run on pushes to main
+          pre_release_branches: "" # No pre-release branches
+          append_to_pre_release_tag: ""
+
+      - name: Update version in install.sh
+        if: steps.tag_version.outputs.new_tag # Only run if a new tag was created
+        run: |
+          NEW_VERSION="${{ steps.tag_version.outputs.new_tag }}"
+          # Remove the 'v' prefix for the script placeholder if it exists
+          NEW_VERSION_NO_V="${NEW_VERSION#v}"
+          echo "New version tag: $NEW_VERSION"
+          echo "Version to insert: $NEW_VERSION_NO_V"
+          # Use sed to replace the placeholder
+          sed -i "s/(v__VERSION__)/(v${NEW_VERSION_NO_V})/" install.sh
+          # Check if replacement was successful
+          if ! grep -q "(v${NEW_VERSION_NO_V})" install.sh; then
+            echo "Error: Failed to replace version placeholder in install.sh"
+            exit 1
+          fi
+          echo "install.sh updated:"
+          grep "(v${NEW_VERSION_NO_V})" install.sh
+
+      - name: Commit changes
+        if: steps.tag_version.outputs.new_tag # Only run if a new tag was created
+        run: |
+          git config --local user.email "${{ steps.user_info.outputs.email }}"
+          git config --local user.name "${{ steps.user_info.outputs.name }}"
+          git add install.sh
+          # Use the email from the original commit author
+          git commit -m "ci: Bump version to ${{ steps.tag_version.outputs.new_tag }}" --author="${{ steps.user_info.outputs.name }} <${{ steps.user_info.outputs.email }}>"
+          git push 
