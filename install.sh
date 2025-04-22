@@ -94,7 +94,7 @@ function cleanup {
     fi
     # Optionally, remove indicator config if it was created.
     if $CREATED_INDICATOR_CONFIG; then
-      rm -f "$HOME/.indicator-sysmonitor.json"
+      rm -f "$USER_HOME/.indicator-sysmonitor.json"
     fi
     # We don't typically remove the config file on cleanup unless explicitly asked
   fi
@@ -278,15 +278,30 @@ CREATED_FILES+=("$DESKTOP_DIR/openvpn_disconnect.desktop")
 ###################################
 # - Setup SysMonitor Indicator ---- #
 ###################################
-if [[ ! -f "$HOME/.indicator-sysmonitor.json" ]]; then
+if [[ ! -f "$USER_HOME/.indicator-sysmonitor.json" || "$FORCE_FLAG" == "true" ]]; then
     echo "Setting up SysMonitor Indicator..."
-    if ! grep -q "fossfreedom/indicator-sysmonitor" /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null; then
-      sudo add-apt-repository ppa:fossfreedom/indicator-sysmonitor -y > /dev/null 2>&1 || true
+    # Check if the PPA is already added
+    if ! grep -qr "fossfreedom/indicator-sysmonitor" /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then
+      echo "Adding indicator-sysmonitor PPA..."
+      sudo add-apt-repository ppa:fossfreedom/indicator-sysmonitor -y > /dev/null 2>&1 || { echo -e "${YELLOW}Warning: Failed to add PPA. Indicator might not install.${ENDCOLOR}"; }
+      sudo apt-get update > /dev/null 2>&1 || true # Update after adding PPA
     fi
-    sudo apt-get update > /dev/null 2>&1 || true
-    sudo apt-get install -y indicator-sysmonitor > /dev/null 2>&1 || true
+    
+    # Check if the package is installed, install if not
+    if ! dpkg -s indicator-sysmonitor >/dev/null 2>&1; then
+        echo "Installing indicator-sysmonitor package..."
+        # Run update again just in case the PPA wasn't added previously but exists now
+        sudo apt-get update > /dev/null 2>&1 || true 
+        sudo apt-get install -y indicator-sysmonitor > /dev/null 2>&1 || { echo -e "${RED}Error: Failed to install indicator-sysmonitor.${ENDCOLOR}"; exit 1; }
+    else
+        echo "indicator-sysmonitor package already installed."
+    fi
 
-    cat <<'EOF' > "$HOME/.indicator-sysmonitor.json"
+    # Ensure the target directory exists
+    mkdir -p "$(dirname "$USER_HOME/.indicator-sysmonitor.json")"
+
+    echo "Creating $USER_HOME/.indicator-sysmonitor.json..."
+    cat <<EOF > "$USER_HOME/.indicator-sysmonitor.json"
 {
   "custom_text": "{openvpn}",
   "interval": 2.0,
@@ -294,24 +309,55 @@ if [[ ! -f "$HOME/.indicator-sysmonitor.json" ]]; then
   "sensors": {
     "openvpn": [
       "Check VPN connection status",
-      "pgrep -f \"^openvpn\" > /dev/null && echo \"VPN running\" || echo \"VPN not running\""
+      "pgrep -f \\"^openvpn\\" > /dev/null && echo \\"VPN running\\" || echo \\"VPN not running\\""
     ]
   }
 }
 EOF
-    CREATED_INDICATOR_CONFIG=true
+    chmod 600 "$USER_HOME/.indicator-sysmonitor.json"
+    # Ensure owner is the original user, not root
+    if [[ -n "$SUDO_USER" ]]; then
+        sudo chown "$SUDO_USER":"$(id -gn $SUDO_USER)" "$USER_HOME/.indicator-sysmonitor.json"
+        # Also chown the parent directory if it was just created by root
+        sudo chown "$SUDO_USER":"$(id -gn $SUDO_USER)" "$(dirname "$USER_HOME/.indicator-sysmonitor.json")"
+    fi
+    CREATED_INDICATOR_CONFIG=true # Mark that we created/overwrote the config
 
-    sudo pkill -f '.*indicator-sysmonitor' 2>/dev/null || true
-    (
-        indicator-sysmonitor >/dev/null 2>&1 &
-        indicator_pid=$!
-        sleep 3
-        if ! kill -0 "$indicator_pid" 2>/dev/null; then
-            echo -e "${YELLOW}Failed to start SysMonitor Indicator. You may need to launch it manually.${ENDCOLOR}"
+    echo "Attempting to restart SysMonitor Indicator..."
+    # Check if the user is running a graphical session and the command exists
+    if [[ -n "$DISPLAY" ]] && command -v indicator-sysmonitor &>/dev/null; then
+        # Kill existing instances (use pkill with the correct user if possible)
+        if [[ -n "$SUDO_USER" ]]; then
+             sudo -u "$SUDO_USER" pkill -f 'indicator-sysmonitor' 2>/dev/null || true
+        else
+             pkill -f 'indicator-sysmonitor' 2>/dev/null || true
         fi
-    ) || true
-else
-    echo "~/.indicator-sysmonitor.json already exists, skipping SysMonitor Indicator setup."
+        sleep 1 # Give it a moment to die
+
+        # Attempt to start as the original user if using sudo
+        if [[ -n "$SUDO_USER" ]]; then
+            sudo -u "$SUDO_USER" DISPLAY="$DISPLAY" XAUTHORITY="${XAUTHORITY:-$USER_HOME/.Xauthority}" indicator-sysmonitor >/dev/null 2>&1 &
+        else
+            indicator-sysmonitor >/dev/null 2>&1 &
+        fi
+        
+        # Give it a moment to start
+        sleep 3 
+        
+        # Check if it's running (simple check)
+        if ! pgrep -f 'indicator-sysmonitor' > /dev/null; then
+            echo -e "${YELLOW}Warning: Failed to start SysMonitor Indicator automatically.${ENDCOLOR}"
+            echo -e "${YELLOW}You may need to launch it manually from your desktop environment.${ENDCOLOR}"
+        else
+            echo "SysMonitor Indicator restarted."
+        fi
+    else
+         echo -e "${YELLOW}Skipping automatic SysMonitor Indicator start (no graphical session detected or command not found).${ENDCOLOR}"
+         echo -e "${YELLOW}You may need to launch it manually from your desktop environment if desired.${ENDCOLOR}"
+    fi
+# Only print this message if the file didn't exist before (i.e., not forced overwrite)
+elif [[ ! -f "$USER_HOME/.indicator-sysmonitor.json" ]]; then 
+    echo "~/.indicator-sysmonitor.json already exists, skipping SysMonitor Indicator setup. Use --force to overwrite."
 fi
 
 ###################################
