@@ -45,15 +45,17 @@ jobs:
           NEW_VERSION_NO_V="${NEW_VERSION#v}"
           echo "New version tag: $NEW_VERSION"
           echo "Version to insert: $NEW_VERSION_NO_V"
-          # Use sed to replace the placeholder
-          sed -i "s/(v__VERSION__)/(v${NEW_VERSION_NO_V})/" install.sh
-          # Check if replacement was successful
-          if ! grep -q "(v${NEW_VERSION_NO_V})" install.sh; then
+          # Use sed to replace the current version (vX.Y.Z) in the specific banner line
+          # Regex: Matches "=== ... (v" followed by digits/dots, ending with ") ==="
+          sed -i -E "s|^(=== ProtonVPN OpenVPN Setup Script \\(v)[0-9.]+(\\) ===)$|\\1${NEW_VERSION_NO_V}\\2|" install.sh
+
+          # Check if replacement was successful by verifying the new version exists in the banner line
+          if ! grep -q "=== ProtonVPN OpenVPN Setup Script (v${NEW_VERSION_NO_V}) ===" install.sh; then
             echo "Error: Failed to replace version placeholder in install.sh"
             exit 1
           fi
           echo "install.sh updated:"
-          grep "(v${NEW_VERSION_NO_V})" install.sh
+          grep "=== ProtonVPN OpenVPN Setup Script (v${NEW_VERSION_NO_V}) ===" install.sh
 
       - name: Commit changes
         if: steps.tag_version.outputs.new_tag # Only run if a new tag was created
