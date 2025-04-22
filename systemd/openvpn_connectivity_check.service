@@ -1,0 +1,14 @@
+[Unit]
+Description=Checks if a specific domain is online; kills openvpn if offline
+
+[Service]
+Type=simple
+# The actual domain is injected here by the install script
+Environment=CONNECTIVITY_CHECK_DOMAIN=%%CONNECTIVITY_CHECK_DOMAIN%%
+# The script path is injected here by the install script
+ExecStart=%%CONNECTIVITY_SCRIPT_PATH%%
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target 

@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- run @install.sh with "export NO_VPN_DOMAINS=api.ipify.org" when testing and then check our IP address using curl ip.wtf and curl api.ipify.org
+- don't create dummy ovpn files. They should be in the Downloads folder (~/Downloads) you can discover them with ls ~/Downloads/*.ovpn
+- to test the actual vpn connection, run /usr/local/bin/openvpn_connect.sh
+- don't edit the installed files, always edit source files here and then re-run the installation before any test run

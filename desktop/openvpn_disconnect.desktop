@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=OpenVPN - Disconnect
+Exec=sh -c "sudo pkill -f '^openvpn'; notify-send 'OpenVPN connection closed.'"
+Icon=network-error
+Terminal=false 

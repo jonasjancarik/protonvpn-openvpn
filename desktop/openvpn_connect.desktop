@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=OpenVPN - Connect
+Exec=sh -c "/usr/local/bin/openvpn_connect.sh && notify-send -t 5 'Connected via OpenVPN' || notify-send 'Failed to connect to OpenVPN'"
+Icon=network-wired
+Terminal=true 
