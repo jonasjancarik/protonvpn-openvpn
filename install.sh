@@ -105,11 +105,11 @@ trap cleanup EXIT
 ###################################
 # ------ Script Banner ---------- #
 ###################################
-echo "================================================="
-echo "=                                               ="
-echo "=      OpenVPN Setup Script (v0.2b)             ="
-echo "=                                               ="
-echo "================================================="
+echo "==================================================="
+echo "=                                                 ="
+echo "=      ProtonVPN OpenVPN Setup Script (v0.1)      ="
+echo "=                                                 ="
+echo "==================================================="
 echo ""
 echo -e "${YELLOW}IMPORTANT:${ENDCOLOR} You will need your special OpenVPN username and password from:"
 echo "  https://account.protonvpn.com/account-password#openvpn"

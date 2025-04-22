@@ -3,10 +3,35 @@
 # Picks the newest .ovpn file from ~/Downloads,
 # Reads persistent configuration from ~/.openvpn/config.env (if it exists),
 # Injects routes for domains specified in $NO_VPN_DOMAINS (comma-separated) to bypass the VPN,
+# Optionally skips SSSD checks if --no-sssd flag is given.
 # then starts openvpn in daemon mode,
 # and waits/polls the log file to see if it connects successfully.
 
-set -x  # Enable debug output
+# --- Argument Parsing ---
+SKIP_SSSD=false
+# Process flags first
+TEMP_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-sssd)
+      SKIP_SSSD=true
+      shift # past argument
+      ;;
+    -*|--*)
+      echo "Unknown option $1" >&2
+      exit 1
+      ;;
+    *)
+      # Save positional arguments if any are needed later (currently none)
+      # TEMP_ARGS+=("$1") 
+      shift # past argument
+      ;;
+  esac
+done
+# Restore positional arguments if needed (currently none)
+# set -- "${TEMP_ARGS[@]}" 
+
+set -x  # Enable debug output (after arg parsing)
 
 # Source persistent configuration if it exists
 CONFIG_ENV_FILE="$HOME/.openvpn/config.env"
@@ -103,69 +128,74 @@ if [[ -n "$NO_VPN_DOMAINS" ]]; then
   done
 fi
 
-# Attempt SSSD Domain Controller Route Injection (Auto-detect all domains)
-echo "Checking for SSSD configuration..."
-SSSD_DOMAINS=()
-while IFS= read -r line; do
-    [[ -n "$line" ]] && SSSD_DOMAINS+=("$line")
-done < <(sudo sssctl domain-list 2>/dev/null)
+# --- SSSD Domain Controller Route Injection ---
+if [[ "$SKIP_SSSD" == "false" ]]; then
+  echo "Checking for SSSD configuration..."
+  SSSD_DOMAINS=()
+  while IFS= read -r line; do
+      [[ -n "$line" ]] && SSSD_DOMAINS+=("$line")
+  done < <(sudo sssctl domain-list 2>/dev/null)
 
-NUM_SSSD_DOMAINS=${#SSSD_DOMAINS[@]}
+  NUM_SSSD_DOMAINS=${#SSSD_DOMAINS[@]}
 
-if [[ $NUM_SSSD_DOMAINS -gt 0 ]]; then
-  echo "Found $NUM_SSSD_DOMAINS SSSD domain(s): ${SSSD_DOMAINS[*]}"
-  # Process each found domain
-  for DETECTED_SSSD_DOMAIN in "${SSSD_DOMAINS[@]}"; do
-    echo "Processing SSSD domain: '$DETECTED_SSSD_DOMAIN'. Discovering domain controllers and adding routes..."
-    # Attempt to get DC info. Redirect stderr to /dev/null to suppress errors if domain is offline.
-    DC_INFO=$(sssctl domain-status "$DETECTED_SSSD_DOMAIN" 2>/dev/null)
-    if [[ -z "$DC_INFO" ]]; then
-        echo "Warning: Could not get domain status for '$DETECTED_SSSD_DOMAIN'. SSSD might be offline or domain not configured." >&2
-    else
-        # Parse the output for server names/IPs
-        DC_LINES=$(echo "$DC_INFO" | awk '/Discovered .* Domain Controller servers:/ {flag=1; next} flag && /^$/ {flag=0} flag')
-        declare -A SSSD_IPS # Use associative array to store unique IPs for *this* domain
-        while IFS= read -r line; do
-            [[ -z "$line" ]] && continue
-            line=$(echo "$line" | xargs)
-            for word in $line; do
-                local current_ip=""
-                if [[ "$word" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                    current_ip="$word"
-                else
-                    resolved_ip=$(get_hostname_ip "$word")
-                    if [[ -n "$resolved_ip" ]]; then
-                        current_ip="$resolved_ip"
-                    else
-                        echo "Warning: Could not resolve SSSD DC hostname '$word' for domain '$DETECTED_SSSD_DOMAIN'. Skipping." >&2
-                    fi
-                fi
-                if [[ -n "$current_ip" ]]; then
-                    # Add IP to array (key is IP, value is 1, ensures uniqueness)
-                    SSSD_IPS["$current_ip"]=1
-                fi
-            done
-        done <<< "$DC_LINES"
+  if [[ $NUM_SSSD_DOMAINS -gt 0 ]]; then
+    echo "Found $NUM_SSSD_DOMAINS SSSD domain(s): ${SSSD_DOMAINS[*]}"
+    # Process each found domain
+    for DETECTED_SSSD_DOMAIN in "${SSSD_DOMAINS[@]}"; do
+      echo "Processing SSSD domain: '$DETECTED_SSSD_DOMAIN'. Discovering domain controllers and adding routes..."
+      # Attempt to get DC info. Redirect stderr to /dev/null to suppress errors if domain is offline.
+      DC_INFO=$(sssctl domain-status "$DETECTED_SSSD_DOMAIN" 2>/dev/null)
+      if [[ -z "$DC_INFO" ]]; then
+          echo "Warning: Could not get domain status for '$DETECTED_SSSD_DOMAIN'. SSSD might be offline or domain not configured." >&2
+      else
+          # Parse the output for server names/IPs
+          DC_LINES=$(echo "$DC_INFO" | awk '/Discovered .* Domain Controller servers:/ {flag=1; next} flag && /^$/ {flag=0} flag')
+          declare -A SSSD_IPS # Use associative array to store unique IPs for *this* domain
+          while IFS= read -r line; do
+              [[ -z "$line" ]] && continue
+              line=$(echo "$line" | xargs)
+              for word in $line; do
+                  local current_ip=""
+                  if [[ "$word" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                      current_ip="$word"
+                  else
+                      resolved_ip=$(get_hostname_ip "$word")
+                      if [[ -n "$resolved_ip" ]]; then
+                          current_ip="$resolved_ip"
+                      else
+                          echo "Warning: Could not resolve SSSD DC hostname '$word' for domain '$DETECTED_SSSD_DOMAIN'. Skipping." >&2
+                      fi
+                  fi
+                  if [[ -n "$current_ip" ]]; then
+                      # Add IP to array (key is IP, value is 1, ensures uniqueness)
+                      SSSD_IPS["$current_ip"]=1
+                  fi
+              done
+          done <<< "$DC_LINES"
 
-        # Add routes for the unique IPs found for this domain
-        added_route_count=0
-        for IP in "${!SSSD_IPS[@]}"; do
-            echo "Adding SSSD route for $IP (Domain: $DETECTED_SSSD_DOMAIN) via net_gateway..."
-            echo "route $IP 255.255.255.255 net_gateway" >> "$TEMP_OVPN"
-            ((added_route_count++))
-        done
+          # Add routes for the unique IPs found for this domain
+          added_route_count=0
+          for IP in "${!SSSD_IPS[@]}"; do
+              echo "Adding SSSD route for $IP (Domain: $DETECTED_SSSD_DOMAIN) via net_gateway..."
+              echo "route $IP 255.255.255.255 net_gateway" >> "$TEMP_OVPN"
+              ((added_route_count++))
+          done
 
-        if [[ $added_route_count -eq 0 ]]; then
-            echo "Warning: No SSSD Domain Controller IPs found or resolved for '$DETECTED_SSSD_DOMAIN'." >&2
-        fi
-        # Clear the array for the next domain
-        unset SSSD_IPS 
-    fi
-  done # End loop through domains
-elif [[ $NUM_SSSD_DOMAINS -eq 0 ]]; then
-    echo "No SSSD domains found. Skipping SSSD DC route injection."
-# The -gt 1 case is now handled by the loop, so no specific message needed here
+          if [[ $added_route_count -eq 0 ]]; then
+              echo "Warning: No SSSD Domain Controller IPs found or resolved for '$DETECTED_SSSD_DOMAIN'." >&2
+          fi
+          # Clear the array for the next domain
+          unset SSSD_IPS 
+      fi
+    done # End loop through domains
+  elif [[ $NUM_SSSD_DOMAINS -eq 0 ]]; then
+      echo "No SSSD domains found. Skipping SSSD DC route injection."
+  # The -gt 1 case is now handled by the loop, so no specific message needed here
+  fi
+else
+    echo "Skipping SSSD check due to --no-sssd flag."
 fi
+# --- End of SSSD Block ---
 
 LOG_FILE="/tmp/openvpn_connect_$(id -u).log"
 PID_FILE="/tmp/openvpn_$(id -u).pid"
@@ -240,5 +270,4 @@ notify-send "OpenVPN" "VPN connection timed out. Check $LOG_FILE."
 if [[ -f "$PID_FILE" ]]; then
   sudo kill "$(cat "$PID_FILE")" 2>/dev/null
 fi
-exit 1 
 exit 1 

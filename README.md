@@ -54,7 +54,8 @@ The installer (`install.sh`) attempts to install `openvpn`, `dialog`, `dnsutils`
 2.  **Bypass Domains (Optional):** During installation, you can use the `--no-vpn-domains "domain1,domain2"` flag to specify domains whose traffic should *not* go through the VPN. This setting is saved to `~/.openvpn/config.env`.
 3.  **Configuration Files:** Download your desired ProtonVPN OpenVPN configuration files (`.ovpn`) from the ProtonVPN website.
 4.  **Placement:** Place one or more `.ovpn` files in your `~/Downloads` directory. The `openvpn_connect.sh` script (and the desktop shortcut) will automatically use the *newest* `.ovpn` file found in that directory.
-5.  **Connect/Disconnect:** Use the desktop shortcuts (`openvpn_connect.desktop`, `openvpn_disconnect.desktop`) or run `/usr/local/bin/openvpn_connect.sh` manually.
+5.  **Connect/Disconnect:** Use the desktop shortcuts (`openvpn_connect.desktop`, `openvpn_disconnect.desktop`) or run `/usr/local/bin/openvpn_connect.sh` manually. 
+    *   You can add the `--no-sssd` flag when running manually (`/usr/local/bin/openvpn_connect.sh --no-sssd`) to prevent the script from attempting SSSD domain discovery and route injection.
 6.  **Monitor:** If `indicator-sysmonitor` was installed, monitor VPN status in the system tray.
 
 ## Configuration / Environment Variables
