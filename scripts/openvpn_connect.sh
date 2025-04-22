@@ -9,6 +9,7 @@
 
 # --- Argument Parsing ---
 SKIP_SSSD=false
+VERBOSE=false # Added VERBOSE flag
 # Process flags first
 TEMP_ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -17,26 +18,39 @@ while [[ $# -gt 0 ]]; do
       SKIP_SSSD=true
       shift # past argument
       ;;
+    --verbose) # Added case for verbose flag
+      VERBOSE=true
+      shift # past argument
+      ;;
     -*|--*)
       echo "Unknown option $1" >&2
       exit 1
       ;;
     *)
       # Save positional arguments if any are needed later (currently none)
-      # TEMP_ARGS+=("$1") 
+      # TEMP_ARGS+=("$1")
       shift # past argument
       ;;
   esac
 done
 # Restore positional arguments if needed (currently none)
-# set -- "${TEMP_ARGS[@]}" 
+# set -- "${TEMP_ARGS[@]}"
 
-set -x  # Enable debug output (after arg parsing)
+# --- Helper Functions ---
+# Added echo_verbose function
+echo_verbose() {
+  if [[ "$VERBOSE" == "true" ]]; then
+    echo "$@"
+  fi
+}
+
+# Removed 'set -x' - Use --verbose flag instead for debugging
+# set -x  # Enable debug output (after arg parsing)
 
 # Source persistent configuration if it exists
 CONFIG_ENV_FILE="$HOME/.openvpn/config.env"
 if [[ -f "$CONFIG_ENV_FILE" ]]; then
-    echo "Loading configuration from $CONFIG_ENV_FILE"
+    echo_verbose "Loading configuration from $CONFIG_ENV_FILE" # Changed to echo_verbose
     # Source the file - variables defined in it are now available here
     # Use . instead of source for better portability
     . "$CONFIG_ENV_FILE"
@@ -46,13 +60,17 @@ CREDENTIALS_FILE="$HOME/.openvpn/credentials.txt"
 LATEST_OVPN="$(ls -t "$HOME"/Downloads/*.ovpn 2>/dev/null | head -n 1)"
 
 if [[ -z "$LATEST_OVPN" ]]; then
+  # Kept notify-send as it's a user notification
   notify-send "OpenVPN" "No .ovpn files found in $HOME/Downloads."
+  # Kept error message on stderr
+  echo "Error: No .ovpn files found in $HOME/Downloads." >&2
   exit 1
 fi
 
 # We'll keep a temporary copy to avoid modifying the user's .ovpn file
 TEMP_OVPN="/tmp/openvpn_temp_$(date +%s).ovpn"
 cp "$LATEST_OVPN" "$TEMP_OVPN"
+echo_verbose "Using configuration: $(basename "$LATEST_OVPN")" # Added summary, uses echo_verbose
 
 # Function to resolve all A record IPs for a domain
 get_domain_ips() {
@@ -68,11 +86,12 @@ get_domain_ips() {
     # Fallback to nslookup (parsing might be less robust)
     ips=($(nslookup "$domain" | awk '/^Address: / {print $2}' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true))
   else
+    # Kept warning on stderr
     echo "Warning: dig, host, and nslookup not found. Cannot resolve IPs for $domain." >&2
   fi
   # Return unique IPs
   if [[ ${#ips[@]} -gt 0 ]]; then
-    printf "%s\n" "${ips[@]}" | sort -u
+    printf "%s\\n" "${ips[@]}" | sort -u
   fi
 }
 
@@ -85,6 +104,7 @@ get_hostname_ip() {
   elif command -v nslookup &>/dev/null; then
     ip=$(nslookup "$hostname" 2>/dev/null | awk '/^Address: / {print $2; exit}')
   else
+      # Kept warning on stderr
       echo "Warning: host and nslookup not found. Cannot resolve hostname $hostname." >&2
   fi
   echo "$ip"
@@ -92,10 +112,10 @@ get_hostname_ip() {
 
 # If NO_VPN_DOMAINS is set, resolve IPs and inject routes
 if [[ -n "$NO_VPN_DOMAINS" ]]; then
-  echo "NO_VPN_DOMAINS set to '$NO_VPN_DOMAINS'. Resolving IPs and adding routes..."
+  echo_verbose "NO_VPN_DOMAINS set to '$NO_VPN_DOMAINS'. Resolving IPs and adding routes..." # Changed to echo_verbose
   # Save original IFS and set it to comma for splitting
   ORIGINAL_IFS=$IFS
-  IFS=',' 
+  IFS=','
   read -ra DOMAINS_TO_BYPASS <<< "$NO_VPN_DOMAINS"
   # Restore original IFS
   IFS=$ORIGINAL_IFS
@@ -106,7 +126,7 @@ if [[ -n "$NO_VPN_DOMAINS" ]]; then
     if [[ -z "$domain" ]]; then
       continue
     fi
-    echo "Processing domain: $domain"
+    echo_verbose "Processing domain: $domain" # Changed to echo_verbose
     DOMAIN_IPS=()
     # Read resolved IPs into an array, handling potential errors
     while IFS= read -r ip; do
@@ -114,13 +134,14 @@ if [[ -n "$NO_VPN_DOMAINS" ]]; then
     done < <(get_domain_ips "$domain")
 
     if [[ ${#DOMAIN_IPS[@]} -eq 0 ]]; then
+        # Kept warning on stderr
         echo "Warning: Could not resolve any IPs for domain '$domain'. Skipping route addition." >&2
         continue
     fi
 
     for IP in "${DOMAIN_IPS[@]}"; do
       if [[ -n "$IP" ]]; then
-        echo "Adding route for $domain ($IP) via net_gateway..."
+        echo_verbose "Adding route for $domain ($IP) via net_gateway..." # Changed to echo_verbose
         # Append route to the temporary config file
         echo "route $IP 255.255.255.255 net_gateway" >> "$TEMP_OVPN"
       fi
@@ -130,7 +151,7 @@ fi
 
 # --- SSSD Domain Controller Route Injection ---
 if [[ "$SKIP_SSSD" == "false" ]]; then
-  echo "Checking for SSSD configuration..."
+  echo_verbose "Checking for SSSD configuration..." # Changed to echo_verbose
   SSSD_DOMAINS=()
   while IFS= read -r line; do
       [[ -n "$line" ]] && SSSD_DOMAINS+=("$line")
@@ -139,13 +160,14 @@ if [[ "$SKIP_SSSD" == "false" ]]; then
   NUM_SSSD_DOMAINS=${#SSSD_DOMAINS[@]}
 
   if [[ $NUM_SSSD_DOMAINS -gt 0 ]]; then
-    echo "Found $NUM_SSSD_DOMAINS SSSD domain(s): ${SSSD_DOMAINS[*]}"
+    echo_verbose "Found $NUM_SSSD_DOMAINS SSSD domain(s): ${SSSD_DOMAINS[*]}" # Changed to echo_verbose
     # Process each found domain
     for DETECTED_SSSD_DOMAIN in "${SSSD_DOMAINS[@]}"; do
-      echo "Processing SSSD domain: '$DETECTED_SSSD_DOMAIN'. Discovering domain controllers and adding routes..."
+      echo_verbose "Processing SSSD domain: '$DETECTED_SSSD_DOMAIN'. Discovering domain controllers and adding routes..." # Changed to echo_verbose
       # Attempt to get DC info. Redirect stderr to /dev/null to suppress errors if domain is offline.
-      DC_INFO=$(sssctl domain-status "$DETECTED_SSSD_DOMAIN" 2>/dev/null)
+      DC_INFO=$(sudo sssctl domain-status "$DETECTED_SSSD_DOMAIN" 2>/dev/null)
       if [[ -z "$DC_INFO" ]]; then
+          # Kept warning on stderr
           echo "Warning: Could not get domain status for '$DETECTED_SSSD_DOMAIN'. SSSD might be offline or domain not configured." >&2
       else
           # Parse the output for server names/IPs
@@ -153,9 +175,10 @@ if [[ "$SKIP_SSSD" == "false" ]]; then
           declare -A SSSD_IPS # Use associative array to store unique IPs for *this* domain
           while IFS= read -r line; do
               [[ -z "$line" ]] && continue
-              line=$(echo "$line" | xargs)
+              # Remove leading '-' and optional space if present
+              line=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//' | xargs)
               for word in $line; do
-                  local current_ip=""
+                  current_ip=""
                   if [[ "$word" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
                       current_ip="$word"
                   else
@@ -163,6 +186,7 @@ if [[ "$SKIP_SSSD" == "false" ]]; then
                       if [[ -n "$resolved_ip" ]]; then
                           current_ip="$resolved_ip"
                       else
+                          # Kept warning on stderr
                           echo "Warning: Could not resolve SSSD DC hostname '$word' for domain '$DETECTED_SSSD_DOMAIN'. Skipping." >&2
                       fi
                   fi
@@ -176,24 +200,25 @@ if [[ "$SKIP_SSSD" == "false" ]]; then
           # Add routes for the unique IPs found for this domain
           added_route_count=0
           for IP in "${!SSSD_IPS[@]}"; do
-              echo "Adding SSSD route for $IP (Domain: $DETECTED_SSSD_DOMAIN) via net_gateway..."
+              echo_verbose "Adding SSSD route for $IP (Domain: $DETECTED_SSSD_DOMAIN) via net_gateway..." # Changed to echo_verbose
               echo "route $IP 255.255.255.255 net_gateway" >> "$TEMP_OVPN"
               ((added_route_count++))
           done
 
           if [[ $added_route_count -eq 0 ]]; then
+              # Kept warning on stderr
               echo "Warning: No SSSD Domain Controller IPs found or resolved for '$DETECTED_SSSD_DOMAIN'." >&2
           fi
           # Clear the array for the next domain
-          unset SSSD_IPS 
+          unset SSSD_IPS
       fi
     done # End loop through domains
   elif [[ $NUM_SSSD_DOMAINS -eq 0 ]]; then
-      echo "No SSSD domains found. Skipping SSSD DC route injection."
+      echo_verbose "No SSSD domains found. Skipping SSSD DC route injection." # Changed to echo_verbose
   # The -gt 1 case is now handled by the loop, so no specific message needed here
   fi
 else
-    echo "Skipping SSSD check due to --no-sssd flag."
+    echo_verbose "Skipping SSSD check due to --no-sssd flag." # Changed to echo_verbose
 fi
 # --- End of SSSD Block ---
 
@@ -202,16 +227,20 @@ PID_FILE="/tmp/openvpn_$(id -u).pid"
 INTERFACE="proton$(id -u)"
 
 # Clean up any existing files
+echo_verbose "Cleaning up old log/pid files..." # Changed to echo_verbose
 sudo rm -f "$LOG_FILE" "$PID_FILE"
 
 # Create log file with proper permissions using sudo
+echo_verbose "Creating log file: $LOG_FILE" # Changed to echo_verbose
 sudo touch "$LOG_FILE"
 sudo chmod 644 "$LOG_FILE"
 
 # Kill any existing OpenVPN processes
+echo_verbose "Stopping any existing OpenVPN processes..." # Changed to echo_verbose
 sudo pkill -f '^openvpn' || true
 sleep 1
 
+echo_verbose "Starting OpenVPN daemon..." # Changed to echo_verbose
 # Overwrite the previous log each time (use --log-append if you want to accumulate)
 sudo openvpn --verb 4 --daemon \
              --config "$TEMP_OVPN" \
@@ -223,8 +252,10 @@ sudo openvpn --verb 4 --daemon \
              --writepid "$PID_FILE"
 
 # Send initial notification with transient hint
+# Kept notify-send as it's a user notification
 notify-send -h int:transient:1 "OpenVPN" "Connecting using $(basename "$LATEST_OVPN")..."
 
+echo_verbose "Polling log file ($LOG_FILE) for connection status..." # Changed to echo_verbose
 # Poll the log file for ~30 seconds
 SUCCESS_MSG="Initialization Sequence Completed"
 FAIL_PATTERNS="AUTH_FAILED|TLS_ERROR"
