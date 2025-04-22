@@ -323,7 +323,7 @@ EOF
     # --- End Config File Creation ---
 
     # --- Restart Indicator (as user) ---
-    echo "Restarting SysMonitor Indicator (as user)..."
+    echo "Restarting SysMonitor Indicator..."
     if command -v indicator-sysmonitor &>/dev/null; then
         # Kill existing indicator owned by the current user
         pkill -f 'indicator-sysmonitor' 2>/dev/null || true
@@ -355,8 +355,7 @@ echo ""
 echo -e "${GREEN}OpenVPN setup script completed successfully!${ENDCOLOR}"
 echo ""
 echo "Next steps:"
-echo "1) Place one or more .ovpn files in ~/Downloads. The newest one will be used when you click the desktop icon."
+echo "1) Download a ProtonVPN .ovpn file (from https://account.protonvpn.com/downloads) to ~/Downloads. The newest one will be used when you click the desktop icon."
 echo "2) If you see 'Allow Launching' warnings on the desktop icons, right-click them and select 'Allow Launching'."
-echo "3) You may need to log out and log back in for the SysMonitor Indicator to appear correctly if 'on_startup' was set."
 
 exit 0
