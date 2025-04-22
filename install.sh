@@ -107,7 +107,7 @@ trap cleanup EXIT
 # ------ Script Banner ---------- #
 ###################################
 echo ""
-echo "=== ProtonVPN OpenVPN Setup Script (v__VERSION__) ==="
+echo "=== ProtonVPN OpenVPN Setup Script (v0.0.1) ==="
 echo ""
 echo "This script will install OpenVPN components and helpers."
 echo "You may be prompted for your password ('sudo') for system-wide changes."
